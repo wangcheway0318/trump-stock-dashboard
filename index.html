@@ -401,7 +401,7 @@
         box.innerHTML = `<div class="p-3 text-xs text-gray-500">沒有找到「${q}」相關股票或 ETF</div>`;
       } else {
         box.innerHTML = matches.map((s) => `
-          <button class="stock-item w-full text-left px-3 py-2 hover:bg-bg/60 border-b border-border/50 last:border-0 flex items-center justify-between gap-2" data-symbol="${s.symbol}" data-name="${s.name}">
+          <button class="stock-item w-full text-left px-3 py-2 hover:bg-bg/60 border-b border-border/50 last:border-0 flex items-center justify-between gap-2" data-symbol="${s.symbol}" data-name="${s.name}" data-market="${s.market}">
             <div class="flex items-center gap-2 min-w-0">
               <span class="text-xs font-mono text-gray-400 shrink-0">${s.symbol}</span>
               <span class="text-sm truncate">${s.name}</span>
@@ -411,7 +411,7 @@
         `).join('');
         box.querySelectorAll('.stock-item').forEach((btn) => {
           btn.addEventListener('click', () => {
-            openStockModal(btn.dataset.symbol, btn.dataset.name);
+            openStockModal(btn.dataset.symbol, btn.dataset.name, btn.dataset.market);
             box.classList.add('hidden');
             $('#stock-search').value = '';
           });
@@ -541,17 +541,20 @@
           `);
         }
 
-        // 類股漲跌
+        // 類股漲跌（可點擊展開成份股）
         if (data.sectors && data.sectors.length > 0) {
           const list = [...data.sectors].sort((a, b) => b.changePercent - a.changePercent);
           parts.push(`
             <div class="bg-bg/50 rounded-lg p-3 border border-border/50">
-              <div class="text-xs font-medium text-gray-300 mb-2">類股漲跌</div>
-              <div class="space-y-1 text-xs">
+              <div class="text-xs font-medium text-gray-300 mb-2">類股漲跌 <span class="text-gray-500 font-normal">（點擊查看前 5 名）</span></div>
+              <div class="space-y-0.5 text-xs">
                 ${list.map((s) => `
-                  <div class="flex justify-between items-center py-0.5">
-                    <span class="text-gray-300">${s.name}</span>
-                    <span class="${colorByChange(s.changePercent)} font-mono">${arrow(s.changePercent)} ${sign(s.changePercent)}${formatNum(s.changePercent, 2)}%</span>
+                  <div class="sector-row" data-sector="${encodeURIComponent(s.name)}">
+                    <button class="sector-btn w-full flex justify-between items-center py-1 px-1.5 rounded hover:bg-bg/60 transition">
+                      <span class="text-gray-300 flex items-center gap-1"><span class="caret text-[10px] text-gray-500">▶</span> ${s.name}</span>
+                      <span class="${colorByChange(s.changePercent)} font-mono">${arrow(s.changePercent)} ${sign(s.changePercent)}${formatNum(s.changePercent, 2)}%</span>
+                    </button>
+                    <div class="sector-content hidden mt-1 mb-1 ml-3 pl-2 border-l-2 border-accent/30 space-y-1"></div>
                   </div>
                 `).join('')}
               </div>
@@ -586,9 +589,52 @@
         } else {
           if (data.date) parts.unshift(`<div class="text-xs text-gray-400">資料日期：${data.date}</div>`);
           wrap.innerHTML = parts.join('');
-          // 綁定股票連結
+          // 綁定股票連結（top volume 全為上市股票）
           wrap.querySelectorAll('.stock-link').forEach((btn) => {
-            btn.addEventListener('click', () => openStockModal(btn.dataset.symbol, btn.dataset.name));
+            btn.addEventListener('click', () => openStockModal(btn.dataset.symbol, btn.dataset.name, '上市'));
+          });
+          // 綁定類股展開
+          wrap.querySelectorAll('.sector-row').forEach((row) => {
+            const btn = row.querySelector('.sector-btn');
+            const content = row.querySelector('.sector-content');
+            const caret = row.querySelector('.caret');
+            btn.addEventListener('click', async () => {
+              const isOpen = !content.classList.contains('hidden');
+              if (isOpen) {
+                content.classList.add('hidden');
+                if (caret) caret.textContent = '▶';
+                return;
+              }
+              if (caret) caret.textContent = '▼';
+              content.classList.remove('hidden');
+              if (content.dataset.loaded !== '1') {
+                content.innerHTML = '<div class="text-gray-500 py-1">載入中...</div>';
+                const sectorName = decodeURIComponent(row.dataset.sector);
+                try {
+                  const r = await fetch(`/.netlify/functions/sector-stocks?sector=${encodeURIComponent(sectorName)}`);
+                  const sd = await r.json();
+                  if (!sd.stocks || sd.stocks.length === 0) {
+                    content.innerHTML = `<div class="text-gray-500 py-1">${sd.error || '無成份股資料'}</div>`;
+                    return;
+                  }
+                  content.innerHTML = sd.stocks.map((s) => `
+                    <button class="sector-stock-link w-full flex items-center justify-between py-1 px-1 rounded hover:bg-accent/10 transition" data-symbol="${s.symbol}" data-name="${s.name}">
+                      <span class="flex items-center gap-1.5 min-w-0">
+                        <span class="font-mono text-gray-500 text-[10px] shrink-0">${s.symbol}</span>
+                        <span class="text-gray-200 truncate">${s.name}</span>
+                      </span>
+                      <span class="${colorByChange(s.change)} font-mono text-[10px] shrink-0">${sign(s.change)}${formatNum(s.change, 2)}</span>
+                    </button>
+                  `).join('');
+                  content.querySelectorAll('.sector-stock-link').forEach((b) => {
+                    b.addEventListener('click', () => openStockModal(b.dataset.symbol, b.dataset.name, '上市'));
+                  });
+                  content.dataset.loaded = '1';
+                } catch (err) {
+                  content.innerHTML = `<div class="text-red-400 py-1">載入失敗：${err.message}</div>`;
+                }
+              }
+            });
           });
         }
         $('#market-updated').textContent = '更新：' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
@@ -646,7 +692,7 @@
       }
     });
 
-    async function openStockModal(symbol, name) {
+    async function openStockModal(symbol, name, market = '上市') {
       $('#stock-modal').classList.remove('hidden');
       $('#modal-symbol').textContent = symbol;
       $('#modal-name').textContent = name;
@@ -656,10 +702,11 @@
       $('#related-stocks').innerHTML = '<div class="text-xs text-gray-500 col-span-full">載入中...</div>';
       $('#related-news').innerHTML = '<div class="text-xs text-gray-500">載入中...</div>';
 
-      // 同時呼叫 stock-detail 與 stock-news
+      // 同時呼叫 stock-detail 與 stock-news（帶 market 區分上市/上櫃）
+      const params = `symbol=${encodeURIComponent(symbol)}&market=${encodeURIComponent(market)}`;
       const [detail, news] = await Promise.all([
-        fetch(`/.netlify/functions/stock-detail?symbol=${encodeURIComponent(symbol)}`).then((r) => r.json()).catch(() => null),
-        fetch(`/.netlify/functions/stock-news?symbol=${encodeURIComponent(symbol)}&name=${encodeURIComponent(name)}`).then((r) => r.json()).catch(() => null),
+        fetch(`/.netlify/functions/stock-detail?${params}`).then((r) => r.json()).catch(() => null),
+        fetch(`/.netlify/functions/stock-news?${params}&name=${encodeURIComponent(name)}`).then((r) => r.json()).catch(() => null),
       ]);
 
       if (!detail || detail.error) {
@@ -709,7 +756,7 @@
         </button>
       `).join('');
       $('#related-stocks').querySelectorAll('.stock-link').forEach((b) => {
-        b.addEventListener('click', () => openStockModal(b.dataset.symbol, b.dataset.name));
+        b.addEventListener('click', () => openStockModal(b.dataset.symbol, b.dataset.name, '上市'));
       });
 
       // 相關新聞

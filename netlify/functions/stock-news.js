@@ -29,9 +29,12 @@ async function fetchGeneralNews() {
 }
 
 // 個股新聞（Yahoo 股市）
-async function fetchStockNewsYahoo(symbol) {
+async function fetchStockNewsYahoo(symbol, market) {
   // Yahoo 內部 API（公開可調用）
-  const sym = /^\d{4,6}$/.test(symbol) ? `${symbol}.TW` : symbol;
+  let sym = symbol;
+  if (/^\d{4,6}[A-Z]?$/.test(symbol)) {
+    sym = market === '上櫃' ? `${symbol}.TWO` : `${symbol}.TW`;
+  }
   const url = `https://tw.stock.yahoo.com/_td-stock/api/resource/StockServices.news;limit=20;symbols=%5B%22${encodeURIComponent(sym)}%22%5D`;
   const res = await fetch(url, {
     headers: {
@@ -71,16 +74,20 @@ export default async (req, context) => {
   const url = new URL(req.url);
   const symbol = (url.searchParams.get('symbol') || '').trim();
   const name = (url.searchParams.get('name') || '').trim();
+  const market = (url.searchParams.get('market') || '').trim();
 
   // 個股新聞
   if (symbol) {
-    const cached = symbolCache.get(symbol);
+    const cacheKey = `${symbol}:${market}`;
+    const cached = symbolCache.get(cacheKey);
     if (cached && Date.now() - cached.fetchedAt < SYMBOL_CACHE_TTL) {
       return Response.json(cached.data);
     }
     let news = [];
     try {
-      news = await fetchStockNewsYahoo(symbol);
+      news = await fetchStockNewsYahoo(symbol, market);
+      // Yahoo 沒結果就 fallback
+      if (news.length === 0 && name) news = await fetchCnyesSearch(name);
     } catch (err) {
       // fallback to cnyes search
       try {
@@ -88,7 +95,7 @@ export default async (req, context) => {
       } catch {}
     }
     const payload = { news, symbol, fetchedAt: new Date().toISOString() };
-    symbolCache.set(symbol, { data: payload, fetchedAt: Date.now() });
+    symbolCache.set(cacheKey, { data: payload, fetchedAt: Date.now() });
     return Response.json(payload);
   }
 

@@ -1,56 +1,43 @@
-// 股票詳情：歷史 OHLC + 計算 KD 指標
-// 資料來源：Yahoo Finance Chart API（公開、免金鑰、含台股）
-//   範例：https://query1.finance.yahoo.com/v8/finance/chart/2330.TW?interval=1d&range=3mo
+// 股票詳情：歷史 OHLC + KD 指標
+// 資料來源：Yahoo Finance Chart API（公開、含台股 .TW / 上櫃 .TWO）
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
   'Accept': 'application/json',
 };
 
-// 計算 KD 指標（標準週期 9）
-// RSV(t) = (close - lowestN) / (highestN - lowestN) * 100
-// K(t)   = 2/3 * K(t-1) + 1/3 * RSV(t)
-// D(t)   = 2/3 * D(t-1) + 1/3 * K(t)
 function calculateKD(highs, lows, closes, n = 9) {
   const k = [], d = [];
   let prevK = 50, prevD = 50;
-
   for (let i = 0; i < closes.length; i++) {
-    if (i < n - 1) {
-      k.push(null);
-      d.push(null);
-      continue;
-    }
-    const periodHighs = highs.slice(i - n + 1, i + 1).filter((v) => v != null);
-    const periodLows = lows.slice(i - n + 1, i + 1).filter((v) => v != null);
-    if (periodHighs.length === 0 || periodLows.length === 0) {
-      k.push(null); d.push(null); continue;
-    }
-    const highest = Math.max(...periodHighs);
-    const lowest = Math.min(...periodLows);
-    const rsv = highest === lowest ? 50 : ((closes[i] - lowest) / (highest - lowest)) * 100;
-    const currK = (2 / 3) * prevK + (1 / 3) * rsv;
-    const currD = (2 / 3) * prevD + (1 / 3) * currK;
-    k.push(Math.round(currK * 100) / 100);
-    d.push(Math.round(currD * 100) / 100);
-    prevK = currK;
-    prevD = currD;
+    if (i < n - 1) { k.push(null); d.push(null); continue; }
+    const ph = highs.slice(i - n + 1, i + 1).filter((v) => v != null);
+    const pl = lows.slice(i - n + 1, i + 1).filter((v) => v != null);
+    if (ph.length === 0 || pl.length === 0) { k.push(null); d.push(null); continue; }
+    const hi = Math.max(...ph), lo = Math.min(...pl);
+    const rsv = hi === lo ? 50 : ((closes[i] - lo) / (hi - lo)) * 100;
+    const ck = (2 / 3) * prevK + (1 / 3) * rsv;
+    const cd = (2 / 3) * prevD + (1 / 3) * ck;
+    k.push(Math.round(ck * 100) / 100);
+    d.push(Math.round(cd * 100) / 100);
+    prevK = ck; prevD = cd;
   }
   return { k, d };
 }
 
-async function fetchYahooChart(symbol, interval, range) {
+async function fetchYahoo(symbol, interval, range) {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}`;
   const res = await fetch(url, { headers: HEADERS });
-  if (!res.ok) throw new Error(`Yahoo chart ${res.status}`);
+  if (!res.ok) throw new Error(`Yahoo ${res.status}`);
   const json = await res.json();
   const result = json?.chart?.result?.[0];
-  if (!result) throw new Error('no chart data');
-
+  if (!result) {
+    const errMsg = json?.chart?.error?.description || 'no chart data';
+    throw new Error(errMsg);
+  }
   const ts = result.timestamp || [];
   const q = result.indicators?.quote?.[0] || {};
   const meta = result.meta || {};
-
   return {
     timestamps: ts.map((t) => t * 1000),
     open: q.open || [],
@@ -64,80 +51,106 @@ async function fetchYahooChart(symbol, interval, range) {
   };
 }
 
-export default async (req, context) => {
-  const url = new URL(req.url);
-  const symbolRaw = (url.searchParams.get('symbol') || '').trim();
-  if (!symbolRaw) {
-    return Response.json({ error: '缺少 symbol 參數' }, { status: 400 });
+// 試 .TW，失敗再試 .TWO
+async function fetchWithFallback(rawSymbol, market, interval, range) {
+  const isNumeric = /^\d{4,6}[A-Z]?$/.test(rawSymbol);
+  const candidates = [];
+  if (rawSymbol.includes('.')) {
+    candidates.push(rawSymbol);
+  } else if (isNumeric) {
+    if (market === '上櫃') {
+      candidates.push(`${rawSymbol}.TWO`, `${rawSymbol}.TW`);
+    } else {
+      candidates.push(`${rawSymbol}.TW`, `${rawSymbol}.TWO`);
+    }
+  } else {
+    candidates.push(rawSymbol);
   }
 
-  // 自動補上 .TW（台股代號 4 位數字）
-  let symbol = symbolRaw;
-  if (/^\d{4,6}$/.test(symbolRaw)) symbol = `${symbolRaw}.TW`;
+  let lastErr;
+  for (const sym of candidates) {
+    try {
+      const data = await fetchYahoo(sym, interval, range);
+      return { data, symbol: sym };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('no candidate');
+}
+
+function trim(data, n) {
+  if (!data) return null;
+  const len = data.timestamps.length;
+  const start = Math.max(0, len - n);
+  return {
+    ...data,
+    timestamps: data.timestamps.slice(start),
+    open: data.open.slice(start),
+    high: data.high.slice(start),
+    low: data.low.slice(start),
+    close: data.close.slice(start),
+    volume: data.volume.slice(start),
+  };
+}
+
+export default async (req, context) => {
+  const url = new URL(req.url);
+  const rawSymbol = (url.searchParams.get('symbol') || '').trim();
+  const market = (url.searchParams.get('market') || '').trim();
+  if (!rawSymbol) return Response.json({ error: '缺少 symbol' }, { status: 400 });
 
   try {
-    // 同步抓四個時間軸
-    const [intraday, threeDay, fiveDay, fifteenDay] = await Promise.all([
-      fetchYahooChart(symbol, '5m', '1d').catch(() => null),
-      fetchYahooChart(symbol, '15m', '5d').catch(() => null),
-      fetchYahooChart(symbol, '30m', '5d').catch(() => null),
-      fetchYahooChart(symbol, '1d', '1mo').catch(() => null),
+    // 先用一個請求試出正確的 symbol，後續沿用
+    const probe = await fetchWithFallback(rawSymbol, market, '1d', '1mo');
+    const symbol = probe.symbol;
+    const fifteenDay = probe.data;
+
+    const [intraday, fiveDay] = await Promise.all([
+      fetchYahoo(symbol, '5m', '1d').catch(() => null),
+      fetchYahoo(symbol, '30m', '5d').catch(() => null),
     ]);
 
-    // 取最近 15 個交易日做 KD（KD 慣例用日線）
-    const daily = fifteenDay;
-    let kd = { k: [], d: [], lastK: null, lastD: null, alert: false };
-    if (daily && daily.close.length >= 9) {
-      const result = calculateKD(daily.high, daily.low, daily.close, 9);
-      kd.k = result.k;
-      kd.d = result.d;
-      const lastIdx = daily.close.length - 1;
-      kd.lastK = result.k[lastIdx];
-      kd.lastD = result.d[lastIdx];
-      // 進場提醒：K 在 20~35 之間（低檔可能反彈）
-      kd.alert = kd.lastK !== null && kd.lastK >= 20 && kd.lastK <= 35;
-    }
+    const threeDay = fiveDay ? trim(fiveDay, Math.ceil(fiveDay.timestamps.length * 0.6)) : null;
 
-    // 縮小回傳體積：15日只取最後 15 筆
-    function trim(data, n) {
-      if (!data) return null;
-      const len = data.timestamps.length;
-      const start = Math.max(0, len - n);
-      return {
-        ...data,
-        timestamps: data.timestamps.slice(start),
-        open: data.open.slice(start),
-        high: data.high.slice(start),
-        low: data.low.slice(start),
-        close: data.close.slice(start),
-        volume: data.volume.slice(start),
+    let kd = { k: [], d: [], lastK: null, lastD: null, alert: false };
+    if (fifteenDay && fifteenDay.close.length >= 9) {
+      const result = calculateKD(fifteenDay.high, fifteenDay.low, fifteenDay.close, 9);
+      const lastIdx = fifteenDay.close.length - 1;
+      kd = {
+        k: result.k,
+        d: result.d,
+        lastK: result.k[lastIdx],
+        lastD: result.d[lastIdx],
+        alert: result.k[lastIdx] !== null && result.k[lastIdx] >= 20 && result.k[lastIdx] <= 35,
       };
     }
 
-    const last15 = trim(daily, 15);
-    if (last15 && kd.k.length === daily.close.length) {
+    const last15 = trim(fifteenDay, 15);
+    if (last15 && kd.k.length === fifteenDay.close.length) {
       kd.k = kd.k.slice(-15);
       kd.d = kd.d.slice(-15);
     }
 
-    const meta = (intraday || threeDay || fiveDay || daily) || {};
-
+    const meta = intraday || fiveDay || fifteenDay || {};
     return Response.json({
       symbol,
       name: meta.name,
       currency: meta.currency,
       previousClose: meta.previousClose,
-      intraday,                      // 1日 5 分線
-      threeDay: trim(threeDay, 100),  // 3 日（用 5 日資料截）
-      fiveDay,                       // 5 日
-      fifteenDay: last15,            // 15 日
+      intraday,
+      threeDay,
+      fiveDay,
+      fifteenDay: last15,
       kd,
       fetchedAt: new Date().toISOString(),
-    }, {
-      headers: { 'Cache-Control': 'public, max-age=60' },
-    });
+    }, { headers: { 'Cache-Control': 'public, max-age=60' } });
   } catch (err) {
-    return Response.json({ error: err.message, symbol }, { status: 200 });
+    return Response.json({
+      error: err.message,
+      symbol: rawSymbol,
+      hint: '可能是 Yahoo Finance 沒有此股票的資料，或代號錯誤',
+    }, { status: 200 });
   }
 };
 
