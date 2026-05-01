@@ -62,7 +62,19 @@
         </div>
       </div>
 
-      <!-- Row 2: 兩個搜尋欄 -->
+      <!-- Row 2: 市場時間軸進度線 -->
+      <div class="mb-2 flex items-center gap-2 text-[10px] sm:text-xs">
+        <span class="text-gray-500 font-mono shrink-0">09:00</span>
+        <div class="relative flex-1 h-1.5 bg-bg/80 rounded-full overflow-hidden">
+          <div id="timeline-pre" class="absolute inset-y-0 left-0 bg-gray-700/50 rounded-l-full" style="width: 0%"></div>
+          <div id="timeline-progress" class="absolute inset-y-0 bg-emerald-500/60 transition-all duration-1000" style="left: 0%; width: 0%"></div>
+          <div id="timeline-post" class="absolute inset-y-0 right-0 bg-gray-700/30 rounded-r-full" style="width: 0%"></div>
+        </div>
+        <span class="text-gray-500 font-mono shrink-0">13:30</span>
+        <span id="timeline-status" class="text-gray-400 shrink-0 min-w-16 text-right font-medium">—</span>
+      </div>
+
+      <!-- Row 3: 兩個搜尋欄 -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <!-- 術語搜尋 -->
         <div class="relative">
@@ -283,7 +295,58 @@
       $('#market-dot').style.animation = open ? '' : 'none';
       $('#market-status').textContent = open ? '台股盤中' : '台股休市';
       $('#market-status').className = open ? 'text-emerald-400' : 'text-gray-500';
+      updateTimeline();
     }
+
+    // 市場時間軸進度線（盤前 → 盤中 → 盤後）
+    function updateTimeline() {
+      const tw = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+      const day = tw.getDay();
+      const minutes = tw.getHours() * 60 + tw.getMinutes() + tw.getSeconds() / 60;
+      const OPEN = 9 * 60;        // 09:00
+      const CLOSE = 13 * 60 + 30; // 13:30
+      const status = $('#timeline-status');
+      const progress = $('#timeline-progress');
+      const pre = $('#timeline-pre');
+      const post = $('#timeline-post');
+
+      if (day === 0 || day === 6) {
+        pre.style.width = '50%'; pre.style.background = 'rgba(75,85,99,0.4)';
+        post.style.width = '50%'; post.style.background = 'rgba(75,85,99,0.4)';
+        progress.style.width = '0%';
+        status.textContent = '週末休市';
+        status.className = 'text-gray-500 shrink-0 min-w-16 text-right font-medium';
+      } else if (minutes < OPEN) {
+        // 盤前
+        pre.style.width = '100%'; pre.style.background = 'rgba(251,191,36,0.25)';
+        post.style.width = '0%';
+        progress.style.width = '0%';
+        const minLeft = Math.round(OPEN - minutes);
+        const hh = Math.floor(minLeft / 60), mm = minLeft % 60;
+        status.textContent = `盤前 ${hh > 0 ? hh + 'h' : ''}${mm}m`;
+        status.className = 'text-amber-400 shrink-0 min-w-16 text-right font-medium';
+      } else if (minutes > CLOSE) {
+        // 盤後
+        pre.style.width = '0%';
+        progress.style.width = '100%';
+        progress.style.background = 'rgba(75,85,99,0.5)';
+        post.style.width = '0%';
+        status.textContent = '盤後';
+        status.className = 'text-gray-400 shrink-0 min-w-16 text-right font-medium';
+      } else {
+        // 盤中
+        const pct = ((minutes - OPEN) / (CLOSE - OPEN)) * 100;
+        pre.style.width = '0%';
+        progress.style.left = '0%';
+        progress.style.width = pct + '%';
+        progress.style.background = 'rgba(16,185,129,0.7)';
+        post.style.width = (100 - pct) + '%';
+        post.style.background = 'rgba(75,85,99,0.2)';
+        status.textContent = `盤中 ${Math.round(pct)}%`;
+        status.className = 'text-emerald-400 shrink-0 min-w-16 text-right font-medium';
+      }
+    }
+
     setInterval(updateClock, 1000);
     updateClock();
 
@@ -451,7 +514,22 @@
         const data = await res.json();
         const feed = $('#trump-feed');
         if (!data.posts || data.posts.length === 0) {
-          feed.innerHTML = `<div class="text-center text-gray-500 py-8 text-sm">${data.error || '暫無資料'}</div>`;
+          // 全部來源失敗時，自動 fallback 為嵌入官方頁面（無翻譯）
+          feed.innerHTML = `
+            <div class="text-[11px] text-amber-400/90 bg-amber-500/10 border border-amber-500/30 rounded p-2 mb-2">
+              ⚠️ API 暫時無法存取，已切換為嵌入模式（中文翻譯停用）。<br />
+              <span class="text-gray-400 text-[10px]">${data.error || '所有來源失敗'}</span>
+            </div>
+            <div class="bg-bg/50 rounded-lg p-2 border border-border/50">
+              <iframe src="https://truthsocial.com/@realDonaldTrump/embed"
+                      style="width:100%; height: 600px; border:0; border-radius: 6px; background:#fff;"
+                      sandbox="allow-scripts allow-same-origin allow-popups"
+                      loading="lazy"></iframe>
+              <div class="mt-2 text-center">
+                <a href="https://truthsocial.com/@realDonaldTrump" target="_blank" rel="noopener"
+                   class="text-xs text-accent hover:underline">於 Truth Social 開啟完整頁面 →</a>
+              </div>
+            </div>`;
           return;
         }
         trumpPosts = data.posts;
@@ -541,28 +619,7 @@
           `);
         }
 
-        // 類股漲跌（可點擊展開成份股）
-        if (data.sectors && data.sectors.length > 0) {
-          const list = [...data.sectors].sort((a, b) => b.changePercent - a.changePercent);
-          parts.push(`
-            <div class="bg-bg/50 rounded-lg p-3 border border-border/50">
-              <div class="text-xs font-medium text-gray-300 mb-2">類股漲跌 <span class="text-gray-500 font-normal">（點擊查看前 5 名）</span></div>
-              <div class="space-y-0.5 text-xs">
-                ${list.map((s) => `
-                  <div class="sector-row" data-sector="${encodeURIComponent(s.name)}">
-                    <button class="sector-btn w-full flex justify-between items-center py-1 px-1.5 rounded hover:bg-bg/60 transition">
-                      <span class="text-gray-300 flex items-center gap-1"><span class="caret text-[10px] text-gray-500">▶</span> ${s.name}</span>
-                      <span class="${colorByChange(s.changePercent)} font-mono">${arrow(s.changePercent)} ${sign(s.changePercent)}${formatNum(s.changePercent, 2)}%</span>
-                    </button>
-                    <div class="sector-content hidden mt-1 mb-1 ml-3 pl-2 border-l-2 border-accent/30 space-y-1"></div>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          `);
-        }
-
-        // 成交量前十
+        // 成交量前十（往上移）
         if (topVolumeStocks.length > 0) {
           parts.push(`
             <div class="bg-bg/50 rounded-lg p-3 border border-border/50">
@@ -577,6 +634,27 @@
                     </button>
                     <span class="text-gray-400 tabular-nums">${formatNum(s.price, 2)}</span>
                     <span class="${colorByChange(s.change)} font-mono w-16 text-right">${sign(s.change)}${formatNum(s.change, 2)}</span>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `);
+        }
+
+        // 類股漲跌（可點擊展開成份股）
+        if (data.sectors && data.sectors.length > 0) {
+          const list = [...data.sectors].sort((a, b) => b.changePercent - a.changePercent);
+          parts.push(`
+            <div class="bg-bg/50 rounded-lg p-3 border border-border/50">
+              <div class="text-xs font-medium text-gray-300 mb-2">類股漲跌 <span class="text-gray-500 font-normal">（點擊查看前 5 名）</span></div>
+              <div class="space-y-0.5 text-xs">
+                ${list.map((s) => `
+                  <div class="sector-row" data-sector="${encodeURIComponent(s.name)}">
+                    <button class="sector-btn w-full flex justify-between items-center py-1 px-1.5 rounded hover:bg-bg/60 transition">
+                      <span class="text-gray-300 flex items-center gap-1"><span class="caret text-[10px] text-gray-500">▶</span> ${s.name}</span>
+                      <span class="${colorByChange(s.changePercent)} font-mono">${arrow(s.changePercent)} ${sign(s.changePercent)}${formatNum(s.changePercent, 2)}%</span>
+                    </button>
+                    <div class="sector-content hidden mt-1 mb-1 ml-3 pl-2 border-l-2 border-accent/30 space-y-1"></div>
                   </div>
                 `).join('')}
               </div>
