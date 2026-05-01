@@ -1,0 +1,14 @@
+{
+  "name": "trump-stock-dashboard",
+  "version": "1.0.0",
+  "description": "Trump Truth Social + 台股三大法人 + 即時新聞 儀表板",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "netlify dev",
+    "build": "echo 'Static site, nothing to build'"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

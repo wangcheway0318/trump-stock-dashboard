@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>每日資訊看板 — Trump x 台股</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            bg: '#0b0f1a',
+            panel: '#131826',
+            border: '#1f2937',
+            accent: '#3b82f6',
+            up: '#ef4444',     // 台股慣例：紅漲
+            down: '#10b981',   // 台股慣例：綠跌
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body { background: #0b0f1a; }
+    .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 0 0 rgba(16,185,129,.7); animation: pulse 2s infinite; }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(16,185,129,.7); }
+      70% { box-shadow: 0 0 0 10px rgba(16,185,129,0); }
+      100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+    }
+    .scroll-area { scrollbar-width: thin; scrollbar-color: #374151 transparent; }
+    .scroll-area::-webkit-scrollbar { width: 6px; }
+    .scroll-area::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    .skeleton { background: linear-gradient(90deg, #1f2937 0%, #2a3447 50%, #1f2937 100%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+  </style>
+</head>
+<body class="text-gray-100 font-sans min-h-screen">
+
+  <!-- Header -->
+  <header class="border-b border-border bg-panel/50 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-3">
+        <span class="text-2xl">📊</span>
+        <div>
+          <h1 class="text-base sm:text-lg font-bold leading-tight">每日資訊看板</h1>
+          <p class="text-xs text-gray-400 hidden sm:block">Trump 動態 · 台股三大法人 · 即時新聞</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 text-xs sm:text-sm">
+        <div class="flex items-center gap-1.5">
+          <span id="market-dot" class="pulse-dot"></span>
+          <span id="market-status" class="text-gray-300">載入中</span>
+        </div>
+        <span id="clock" class="text-gray-400 font-mono tabular-nums"></span>
+      </div>
+    </div>
+
+    <!-- Mobile tabs -->
+    <nav class="md:hidden border-t border-border flex">
+      <button data-tab="trump" class="tab-btn flex-1 py-2 text-sm font-medium border-b-2 border-accent text-accent">Trump</button>
+      <button data-tab="market" class="tab-btn flex-1 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400">三大法人</button>
+      <button data-tab="news" class="tab-btn flex-1 py-2 text-sm font-medium border-b-2 border-transparent text-gray-400">新聞</button>
+    </nav>
+  </header>
+
+  <!-- Main grid -->
+  <main class="max-w-screen-2xl mx-auto px-3 sm:px-4 py-4">
+    <div class="grid md:grid-cols-3 gap-4">
+
+      <!-- Trump panel -->
+      <section data-panel="trump" class="panel bg-panel rounded-xl border border-border overflow-hidden flex flex-col" style="height: calc(100vh - 140px); min-height: 500px;">
+        <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">🇺🇸</span>
+            <h2 class="font-semibold">Trump · Truth Social</h2>
+          </div>
+          <span id="trump-updated" class="text-[10px] text-gray-500"></span>
+        </div>
+        <div id="trump-feed" class="flex-1 overflow-y-auto scroll-area p-3 space-y-3">
+          <div class="skeleton h-24 rounded-lg"></div>
+          <div class="skeleton h-32 rounded-lg"></div>
+          <div class="skeleton h-20 rounded-lg"></div>
+        </div>
+      </section>
+
+      <!-- Institutional investors panel -->
+      <section data-panel="market" class="panel hidden md:flex bg-panel rounded-xl border border-border overflow-hidden flex-col" style="height: calc(100vh - 140px); min-height: 500px;">
+        <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">📈</span>
+            <h2 class="font-semibold">三大法人買賣超</h2>
+          </div>
+          <span id="market-updated" class="text-[10px] text-gray-500"></span>
+        </div>
+        <div id="market-content" class="flex-1 overflow-y-auto scroll-area p-4 space-y-4">
+          <div class="skeleton h-20 rounded-lg"></div>
+          <div class="skeleton h-20 rounded-lg"></div>
+          <div class="skeleton h-20 rounded-lg"></div>
+        </div>
+      </section>
+
+      <!-- News panel -->
+      <section data-panel="news" class="panel hidden md:flex bg-panel rounded-xl border border-border overflow-hidden flex-col" style="height: calc(100vh - 140px); min-height: 500px;">
+        <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">📰</span>
+            <h2 class="font-semibold">台股新聞</h2>
+          </div>
+          <span id="news-updated" class="text-[10px] text-gray-500"></span>
+        </div>
+        <div id="news-feed" class="flex-1 overflow-y-auto scroll-area p-3 space-y-2">
+          <div class="skeleton h-16 rounded-lg"></div>
+          <div class="skeleton h-16 rounded-lg"></div>
+          <div class="skeleton h-16 rounded-lg"></div>
+          <div class="skeleton h-16 rounded-lg"></div>
+        </div>
+      </section>
+
+    </div>
+
+    <footer class="text-center text-xs text-gray-600 mt-6 pb-4">
+      資料來源：Truth Social · 台灣證券交易所 · 鉅亨網　|　僅供參考，非投資建議
+    </footer>
+  </main>
+
+  <script>
+    // ========== 工具函式 ==========
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => document.querySelectorAll(sel);
+
+    function timeAgo(date) {
+      const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
+      if (seconds < 60) return seconds + ' 秒前';
+      const minutes = Math.floor(seconds / 60);
+      if (minutes < 60) return minutes + ' 分鐘前';
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return hours + ' 小時前';
+      const days = Math.floor(hours / 24);
+      if (days < 7) return days + ' 天前';
+      return new Date(date).toLocaleDateString('zh-TW');
+    }
+
+    function formatNumber(n) {
+      if (n === null || n === undefined || isNaN(n)) return '—';
+      return new Intl.NumberFormat('zh-TW').format(n);
+    }
+
+    // 將「億元」格式化（輸入單位：元）
+    function toYi(n) {
+      if (n === null || n === undefined || isNaN(n)) return '—';
+      const yi = n / 1e8;
+      const sign = yi >= 0 ? '+' : '';
+      return sign + yi.toFixed(2) + ' 億';
+    }
+
+    // ========== 時鐘 + 開收盤狀態 ==========
+    function isMarketOpen() {
+      const now = new Date();
+      const tw = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+      const day = tw.getDay(); // 0=Sun, 6=Sat
+      if (day === 0 || day === 6) return false;
+      const minutes = tw.getHours() * 60 + tw.getMinutes();
+      return minutes >= 9 * 60 && minutes <= 13 * 60 + 30;
+    }
+
+    function updateClock() {
+      const now = new Date();
+      const tw = now.toLocaleString('zh-TW', {
+        timeZone: 'Asia/Taipei',
+        hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+      });
+      $('#clock').textContent = tw + ' (台北)';
+
+      const open = isMarketOpen();
+      const dot = $('#market-dot');
+      const status = $('#market-status');
+      if (open) {
+        dot.style.background = '#10b981';
+        status.textContent = '台股盤中';
+        status.className = 'text-emerald-400';
+      } else {
+        dot.style.background = '#6b7280';
+        dot.style.animation = 'none';
+        status.textContent = '台股休市';
+        status.className = 'text-gray-500';
+      }
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ========== Tabs (mobile) ==========
+    $$('.tab-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab;
+        $$('.tab-btn').forEach((b) => {
+          b.classList.remove('border-accent', 'text-accent');
+          b.classList.add('border-transparent', 'text-gray-400');
+        });
+        btn.classList.add('border-accent', 'text-accent');
+        btn.classList.remove('border-transparent', 'text-gray-400');
+        $$('.panel').forEach((p) => {
+          if (p.dataset.panel === tab) p.classList.remove('hidden');
+          else if (window.innerWidth < 768) p.classList.add('hidden');
+        });
+      });
+    });
+
+    // ========== 抓取 Trump 推文 ==========
+    async function loadTrump() {
+      try {
+        const res = await fetch('/.netlify/functions/trump-posts');
+        const data = await res.json();
+        const feed = $('#trump-feed');
+
+        if (!data.posts || data.posts.length === 0) {
+          feed.innerHTML = `<div class="text-center text-gray-500 py-8 text-sm">${data.error || '暫無資料'}</div>`;
+          return;
+        }
+
+        feed.innerHTML = data.posts.map((post) => `
+          <article class="bg-bg/50 rounded-lg p-3 border border-border/50 hover:border-border transition">
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs text-gray-400">@realDonaldTrump</span>
+              <span class="text-[10px] text-gray-500">${timeAgo(post.created_at)}</span>
+            </div>
+            <div class="text-sm leading-relaxed text-gray-200 break-words">${post.content}</div>
+            ${post.media && post.media.length ? `
+              <div class="mt-2 grid gap-2 ${post.media.length > 1 ? 'grid-cols-2' : ''}">
+                ${post.media.map(m => `<img src="${m}" class="rounded-md w-full max-h-64 object-cover" loading="lazy" />`).join('')}
+              </div>
+            ` : ''}
+            ${post.url ? `<a href="${post.url}" target="_blank" rel="noopener" class="text-[11px] text-accent hover:underline mt-2 inline-block">於 Truth Social 開啟 →</a>` : ''}
+          </article>
+        `).join('');
+
+        $('#trump-updated').textContent = '更新：' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+      } catch (err) {
+        $('#trump-feed').innerHTML = `<div class="text-center text-red-400 py-8 text-sm">載入失敗：${err.message}</div>`;
+      }
+    }
+
+    // ========== 抓取三大法人 ==========
+    async function loadMarket() {
+      try {
+        const res = await fetch('/.netlify/functions/institutional-investors');
+        const data = await res.json();
+        const wrap = $('#market-content');
+
+        if (!data.investors || data.investors.length === 0) {
+          wrap.innerHTML = `<div class="text-center text-gray-500 py-8 text-sm">${data.error || '尚無當日資料（可能尚未開盤或為休市日）'}</div>`;
+          return;
+        }
+
+        const dateLabel = data.date ? `<div class="text-xs text-gray-400 mb-2">交易日：${data.date}</div>` : '';
+
+        const cards = data.investors.map((inv) => {
+          const net = inv.netBuySell;
+          const positive = net >= 0;
+          const colorClass = positive ? 'text-up' : 'text-down';
+          const bgClass = positive ? 'bg-up/10' : 'bg-down/10';
+          const arrow = positive ? '▲' : '▼';
+          return `
+            <div class="bg-bg/50 rounded-lg p-4 border border-border/50">
+              <div class="flex items-center justify-between mb-2">
+                <span class="font-medium">${inv.name}</span>
+                <span class="${colorClass} font-bold ${bgClass} px-2 py-0.5 rounded text-sm">${arrow} ${toYi(Math.abs(net))}</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-xs text-gray-400">
+                <div>買進：<span class="text-gray-200">${toYi(inv.buy)}</span></div>
+                <div>賣出：<span class="text-gray-200">${toYi(inv.sell)}</span></div>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        // 合計
+        const total = data.investors.reduce((s, i) => s + i.netBuySell, 0);
+        const totalCard = `
+          <div class="bg-gradient-to-br from-accent/10 to-bg/50 rounded-lg p-4 border border-accent/30">
+            <div class="text-xs text-gray-400 mb-1">三大法人合計買賣超</div>
+            <div class="text-2xl font-bold ${total >= 0 ? 'text-up' : 'text-down'}">${total >= 0 ? '+' : ''}${toYi(total)}</div>
+          </div>
+        `;
+
+        wrap.innerHTML = dateLabel + totalCard + cards;
+        $('#market-updated').textContent = '更新：' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+      } catch (err) {
+        $('#market-content').innerHTML = `<div class="text-center text-red-400 py-8 text-sm">載入失敗：${err.message}</div>`;
+      }
+    }
+
+    // ========== 抓取股市新聞 ==========
+    async function loadNews() {
+      try {
+        const res = await fetch('/.netlify/functions/stock-news');
+        const data = await res.json();
+        const feed = $('#news-feed');
+
+        if (!data.news || data.news.length === 0) {
+          feed.innerHTML = `<div class="text-center text-gray-500 py-8 text-sm">${data.error || '暫無新聞'}</div>`;
+          return;
+        }
+
+        feed.innerHTML = data.news.map((item) => `
+          <a href="${item.url}" target="_blank" rel="noopener" class="block bg-bg/50 rounded-lg p-3 border border-border/50 hover:border-accent/50 transition">
+            <div class="flex justify-between items-start gap-2 mb-1">
+              <span class="text-[10px] text-gray-500">${item.source || '鉅亨網'}</span>
+              <span class="text-[10px] text-gray-500 shrink-0">${timeAgo(item.publishedAt)}</span>
+            </div>
+            <h3 class="text-sm font-medium leading-snug">${item.title}</h3>
+            ${item.summary ? `<p class="text-xs text-gray-400 mt-1 line-clamp-2">${item.summary}</p>` : ''}
+          </a>
+        `).join('');
+
+        $('#news-updated').textContent = '更新：' + new Date().toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+      } catch (err) {
+        $('#news-feed').innerHTML = `<div class="text-center text-red-400 py-8 text-sm">載入失敗：${err.message}</div>`;
+      }
+    }
+
+    // ========== 智慧輪詢策略 ==========
+    // Trump：固定每 60 秒
+    // 三大法人：盤中每 30 秒，盤後 15 分鐘
+    // 新聞：盤中每 5 分鐘，盤後 15 分鐘
+    let trumpTimer, marketTimer, newsTimer;
+
+    function schedulePolling() {
+      const open = isMarketOpen();
+      clearInterval(marketTimer);
+      clearInterval(newsTimer);
+
+      marketTimer = setInterval(loadMarket, open ? 30 * 1000 : 15 * 60 * 1000);
+      newsTimer = setInterval(loadNews, open ? 5 * 60 * 1000 : 15 * 60 * 1000);
+    }
+
+    // 啟動
+    loadTrump(); loadMarket(); loadNews();
+    trumpTimer = setInterval(loadTrump, 60 * 1000);
+    schedulePolling();
+    // 每分鐘檢查一次是否需要切換輪詢頻率
+    setInterval(schedulePolling, 60 * 1000);
+
+    // 分頁回到前景時立刻刷新
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) { loadTrump(); loadMarket(); loadNews(); }
+    });
+  </script>
+</body>
+</html>
